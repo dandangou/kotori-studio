@@ -1,0 +1,32 @@
+.venv/
+.runtime/
+data/
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store
+node_modules/
+test-results/
+
+# Local credentials and private work records
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+cookies*.txt
+.auth/
+.codex/
+.agents/
+CONTRACT.md
+VERIFICATION.md
+# Media and model files are downloaded locally, never distributed here
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.mp3
+*.wav
+*.safetensors
+*.npz
+*.part
