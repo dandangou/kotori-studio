@@ -6,9 +6,9 @@
 
 **第一次使用？先打开 [图解使用手册](docs/USER_GUIDE.md)**：从安装到导出，逐步说明每个窗口的入口、设置和结果。
 
-![烤肉工房工作台](docs/images/overview.png)
+[![烤肉工房工作台](docs/images/overview.png)](docs/images/overview.png?raw=1)
 
-截图使用合成演示素材与手动示例字幕，不代表模型识别、翻译或自动选片的实际效果。
+截图采用 2× 像素无损 PNG；点击图片查看原图。演示素材与手动示例字幕不代表模型识别、翻译或自动选片的实际效果。
 
 | 想做什么 | 图文教程 |
 | --- | --- |
@@ -22,11 +22,11 @@
 
 ### 字幕与角色配色
 
-![字幕打轴与逐句校对](docs/images/timing.png)
+[![字幕打轴与逐句校对](docs/images/timing.png)](docs/images/timing.png?raw=1)
 
 ### 一场直播，多部作品
 
-![管理多个命名切片](docs/images/clips.png)
+[![管理多个命名切片](docs/images/clips.png)](docs/images/clips.png?raw=1)
 
 
 ## 支持平台与首次安装
