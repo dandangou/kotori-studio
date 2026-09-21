@@ -2,6 +2,33 @@
 
 在 Mac 上完成 **长直播找片 → 日语识别 → 中文初译 → 校对打轴 → 切片与字幕导出** 的本地工作台。为 Apple Silicon / 16 GB 内存配置设计，界面是浏览器，本机 Python 服务负责处理；视频和模型无需交给云端服务。
 
+## 看图开始
+
+**第一次使用？先打开 [图解使用手册](docs/USER_GUIDE.md)**：从安装到导出，逐步说明每个窗口的入口、设置和结果。
+
+![烤肉工房工作台](docs/images/overview.png)
+
+截图使用合成演示素材与手动示例字幕，不代表模型识别、翻译或自动选片的实际效果。
+
+| 想做什么 | 图文教程 |
+| --- | --- |
+| 导入视频、安装离线模型 | [导入](docs/USER_GUIDE.md#import) · [模型](docs/USER_GUIDE.md#models) |
+| 找精彩片段、识别和初译 | [找片](docs/USER_GUIDE.md#highlights) · [ASR](docs/USER_GUIDE.md#asr) · [翻译](docs/USER_GUIDE.md#translation) |
+| 一边听一边翻译、修轴 | [字幕校对与打轴](docs/USER_GUIDE.md#timing) |
+| 不同角色用不同颜色、多人齐声 | [角色配色](docs/USER_GUIDE.md#speakers) |
+| 删除插话、拼接前后呼应 | [多段拼接](docs/USER_GUIDE.md#assembly) |
+| 一场直播产出多个作品 | [我的切片](docs/USER_GUIDE.md#clips) |
+| 导出 1080p 视频和字幕文件 | [导出与分辨率](docs/USER_GUIDE.md#export) |
+
+### 字幕与角色配色
+
+![字幕打轴与逐句校对](docs/images/timing.png)
+
+### 一场直播，多部作品
+
+![管理多个命名切片](docs/images/clips.png)
+
+
 ## 支持平台与首次安装
 
 当前版本面向 **macOS + Apple Silicon（M1 或更新）**，建议 16 GB 内存；Windows、Linux、Intel Mac 的完整流程尚不支持。源码不包含视频、字幕项目、模型、Python 环境或 FFmpeg 二进制。
