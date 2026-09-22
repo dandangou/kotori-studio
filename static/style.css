@@ -2472,3 +2472,9 @@ dialog::backdrop {
 @media(max-width:600px){.sentence-settings{grid-template-columns:1fr 1fr;}}
 .checkbox-field {display:flex;align-items:flex-start;gap:8px;margin:16px 0;line-height:1.6;}
 .checkbox-field input {flex-shrink:0;margin-top:4px;}
+
+.japanese-editor {min-width:0;}
+.furigana-text {padding:7px 5px 4px;font-size:14px;line-height:2.5;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere;}
+.furigana-text ruby {ruby-position:over;}
+.furigana-text rt {font-size:10px;color:var(--purple);line-height:1.2;}
+#furigana-toggle[aria-pressed=true] {color:var(--purple);background:#ac9afa18;border-color:#ac9afa60;}

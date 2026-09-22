@@ -207,6 +207,18 @@ class SentenceOptions(BaseModel):
     end: float | None = Field(default=None, ge=0)
 
 
+class ReadingRequest(BaseModel):
+    texts: list[str] = Field(max_length=120)
+
+
+@app.post("/api/readings")
+def readings(body: ReadingRequest):
+    from .readings import furigana
+    if any(len(text) > 4000 for text in body.texts) or sum(map(len, body.texts)) > 60000:
+        raise ValueError("注音文本过长，请缩小范围")
+    return {"readings": [furigana(text) for text in body.texts]}
+
+
 @app.post("/api/projects/{project_id}/sentence-preview")
 def sentence_preview(project_id: str, body: SentenceOptions):
     from .subtitles import sentence_merges

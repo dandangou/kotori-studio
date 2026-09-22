@@ -308,9 +308,37 @@ async function batchExport() {
   notify(`已提交 ${queued} 个切片，将分别生成文件。`); await pollJobs();
 }
 
+let showFurigana = true, readingTimer = null, readingVersion = 0;
+const readingCache = new Map();
+function rubyMarkup(parts) {
+  return parts.map(p => p.reading ? `<ruby>${escapeHtml(p.text)}<rp>（</rp><rt>${escapeHtml(p.reading)}</rt><rp>）</rp></ruby>` : escapeHtml(p.text)).join('');
+}
+function paintReadings() {
+  for (const row of state.rowMap.values()) {
+    const text = row.querySelector('[data-field=ja]').value, box = row.querySelector('.furigana-text');
+    box.hidden = !showFurigana || !/[\u3400-\u9fff々〆〇\u{20000}-\u{2fa1f}]/u.test(text);
+    const markup = readingCache.has(text) ? rubyMarkup(readingCache.get(text)) : escapeHtml(text);
+    if (box.innerHTML !== markup) box.innerHTML = markup;
+  }
+}
+function scheduleReadings() {
+  clearTimeout(readingTimer); const version = ++readingVersion; paintReadings();
+  if (!showFurigana) return;
+  readingTimer = setTimeout(async () => {
+    const texts = [...new Set([...state.rowMap.values()].map(row => row.querySelector('[data-field=ja]').value))].filter(text => text.length <= 4000 && /[\u3400-\u9fff々〆〇\u{20000}-\u{2fa1f}]/u.test(text) && !readingCache.has(text));
+    if (!texts.length) return;
+    try {
+      const result = await api('/api/readings',{method:'POST',body:{texts}});
+      texts.forEach((text,i) => readingCache.set(text,result.readings[i]));
+      while (readingCache.size > 512) readingCache.delete(readingCache.keys().next().value);
+      if (version === readingVersion) paintReadings();
+    } catch (error) { if (version === readingVersion) notify(`假名注音暂不可用：${error.message}`,true); }
+  },300);
+}
+
 function makeSubtitleRow(segment) {
   const row = document.createElement('div'); row.className = 'subtitle-row'; row.dataset.id = segment.id;
-  row.innerHTML = '<div class="subtitle-meta"><div class="subtitle-index-line"><button class="subtitle-index" data-row-action="seek" title="定位到这条字幕"></button><span class="segment-flags"></span></div><div class="subtitle-times"><label><button class="cue-time-pin" data-row-action="pin-start" title="将字幕入点设为播放头（Alt / ⌥ + I）" aria-label="将字幕入点设为播放头">IN</button><input data-field="start" spellcheck="false" aria-label="字幕开始时间" title="字幕入点；Alt / ⌥ + I 可设为播放头"></label><label><button class="cue-time-pin" data-row-action="pin-end" title="将字幕出点设为播放头（Alt / ⌥ + O）" aria-label="将字幕出点设为播放头">OUT</button><input data-field="end" spellcheck="false" aria-label="字幕结束时间" title="字幕出点；Alt / ⌥ + O 可设为播放头"></label></div><div class="cue-speakers" role="group" aria-label="说话人，可多选齐声"></div></div><textarea data-field="ja" spellcheck="false" aria-label="日文原文" placeholder="日文原文"></textarea><textarea data-field="zh" spellcheck="false" aria-label="中文译文" placeholder="等待初译，或在这里开始翻译"></textarea><button class="review-toggle" data-row-action="review" title="标记为已校对" aria-label="标记为已校对"><svg><use href="#i-check"/></svg></button>';
+  row.innerHTML = '<div class="subtitle-meta"><div class="subtitle-index-line"><button class="subtitle-index" data-row-action="seek" title="定位到这条字幕"></button><span class="segment-flags"></span></div><div class="subtitle-times"><label><button class="cue-time-pin" data-row-action="pin-start" title="将字幕入点设为播放头（Alt / ⌥ + I）" aria-label="将字幕入点设为播放头">IN</button><input data-field="start" spellcheck="false" aria-label="字幕开始时间" title="字幕入点；Alt / ⌥ + I 可设为播放头"></label><label><button class="cue-time-pin" data-row-action="pin-end" title="将字幕出点设为播放头（Alt / ⌥ + O）" aria-label="将字幕出点设为播放头">OUT</button><input data-field="end" spellcheck="false" aria-label="字幕结束时间" title="字幕出点；Alt / ⌥ + O 可设为播放头"></label></div><div class="cue-speakers" role="group" aria-label="说话人，可多选齐声"></div></div><div class="japanese-editor"><div class="furigana-text" lang="ja" aria-label="日文假名注音参考" title="本地词典注音，仅校对参考；人名和多音字可能不准，不参与导出。" hidden></div><textarea data-field="ja" spellcheck="false" aria-label="日文原文" placeholder="日文原文"></textarea></div><textarea data-field="zh" spellcheck="false" aria-label="中文译文" placeholder="等待初译，或在这里开始翻译"></textarea><button class="review-toggle" data-row-action="review" title="标记为已校对" aria-label="标记为已校对"><svg><use href="#i-check"/></svg></button>';
   return row;
 }
 function filteredSegments() {
@@ -365,6 +393,7 @@ function renderSubtitles() {
   $('subtitle-prev-page').disabled = state.subtitlePage === 0;
   $('subtitle-next-page').disabled = (state.subtitlePage+1)*PAGE_SIZE >= filtered.length;
   updateEditButtons();
+  scheduleReadings();
 }
 function updateEditButtons() {
   const selected = state.project?.segments.some((s) => s.id === state.selectedId);
@@ -743,9 +772,10 @@ function bindEvents() {
   }
   $('candidates').onclick = handle((event) => { const assemble = event.target.closest('[data-assemble]'); if (assemble) { const h = state.project.highlights.find(h => h.id === assemble.dataset.assemble); addAssembly(h.ranges || [{start:h.start,end:h.end}]); showDialog('assembly-dialog'); return; } const retain = event.target.closest('[data-retain]'); if (retain) { const h = state.project.highlights.find((h) => h.id === retain.dataset.retain); h.selected = !h.selected; markDirty(); renderCandidates(); return; } const card = event.target.closest('[data-highlight]'); if (card) chooseHighlight(card.dataset.highlight); });
   $('candidates').onkeydown = handle((event) => { if (event.key === 'Enter' && event.target.dataset.highlight) chooseHighlight(event.target.dataset.highlight); });
+  $('furigana-toggle').onclick = () => { showFurigana = !showFurigana; $('furigana-toggle').ariaPressed = String(showFurigana); try { localStorage.setItem('kotori.furigana',String(showFurigana)); } catch (_) {} scheduleReadings(); };
   $('subtitle-filter').onchange = () => { state.subtitlePage = 0; renderSubtitles(); };
   $('subtitle-list').addEventListener('focusin',(event) => { const row = event.target.closest('.subtitle-row'); if (row) { selectSegment(row.dataset.id); if (event.target.matches('textarea,input')) checkpoint(); } });
-  $('subtitle-list').addEventListener('input',(event) => { if (event.target.matches('input[data-field]')) { event.target.dataset.dirty = 'true'; return; } if (!event.target.matches('textarea')) return; const row = event.target.closest('.subtitle-row'), segment = state.project.segments.find((s) => s.id === row.dataset.id); segment[event.target.dataset.field] = event.target.value; segment.reviewed = false; row.querySelector('.review-toggle').classList.remove('reviewed'); markDirty(); renderOverlay(); });
+  $('subtitle-list').addEventListener('input',(event) => { if (event.target.matches('input[data-field]')) { event.target.dataset.dirty = 'true'; return; } if (!event.target.matches('textarea')) return; const row = event.target.closest('.subtitle-row'), segment = state.project.segments.find((s) => s.id === row.dataset.id); segment[event.target.dataset.field] = event.target.value; segment.reviewed = false; row.querySelector('.review-toggle').classList.remove('reviewed'); markDirty(); renderOverlay(); if (event.target.dataset.field === 'ja') scheduleReadings(); });
   $('subtitle-list').addEventListener('change',handle((event) => { if (event.target.matches('input[data-field]')) commitSubtitleTime(event.target); }));
   $('subtitle-list').addEventListener('focusout',handle((event) => { if (event.target.matches('input[data-field]')) commitSubtitleTime(event.target); }));
   $('subtitle-list').addEventListener('keydown',handle((event) => { if (event.key === 'Enter' && event.target.matches('input[data-field]')) { event.preventDefault(); commitSubtitleTime(event.target); event.target.blur(); } }));
@@ -811,6 +841,8 @@ function bindEvents() {
 
 async function init() {
   try { const saved = JSON.parse(localStorage.getItem('kotori.editor-recovery.v1') || '[]'); if (Array.isArray(saved)) state.recovery = saved.filter((r) => r?.id && r?.projectId && r?.segment?.id); } catch (_) { /* Start normally if a browser disables local storage. */ }
+  try { showFurigana = localStorage.getItem('kotori.furigana') !== 'false'; } catch (_) {}
+  $('furigana-toggle').ariaPressed = String(showFurigana);
   bindEvents();
   const results = await Promise.allSettled([loadProjects(),loadSystem(),pollJobs()]);
   if (results[0].status === 'rejected') { notify('无法连接本地服务，请通过「启动烤肉工房.command」启动应用。',true); return; }

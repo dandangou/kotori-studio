@@ -373,3 +373,13 @@ test('sentence merge application keeps unselected cues and can restore the origi
   assert.equal(run('resultCues[0].ja'),'お姉ちゃんの後輩');
   assert.equal(run('JSON.stringify(applySentenceMerges(originalCues,[]))'),run('originalSnapshot'));
 });
+
+test('furigana markup escapes original text and readings without changing source data', () => {
+  const {run} = harness();
+  run(`const readingParts = [{text:'食',reading:'た'},{text:'べる <img>',reading:''},{text:'字',reading:'<script>'}]; const readingBefore = JSON.stringify(readingParts);`);
+  const markup = run('rubyMarkup(readingParts)');
+  assert.ok(markup.includes('<ruby>食<rp>（</rp><rt>た</rt>'));
+  assert.ok(markup.includes('&lt;img&gt;'));
+  assert.ok(markup.includes('&lt;script&gt;'));
+  assert.equal(run('JSON.stringify(readingParts)'),run('readingBefore'));
+});

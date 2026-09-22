@@ -48,6 +48,16 @@ def test_sentence_preview_is_read_only_and_validates_limits(client):
     assert client.post(url, json={"max_gap": 20}).status_code == 422
 
 
+def test_readings_are_display_only_and_bounded(client):
+    p = make_project()
+    response = client.post('/api/readings', json={"texts": ["日本語", "こんにちは"]})
+    assert response.status_code == 200
+    assert response.json()["readings"][0] == [{"text": "日本語", "reading": "にほんご"}]
+    assert store.get_project(p["id"]) == p
+    assert client.post('/api/readings', json={"texts": ["a"] * 121}).status_code == 422
+    assert client.post('/api/readings', json={"texts": ["a" * 4001]}).status_code == 400
+
+
 def test_invalid_export_range_never_queued(client):
     p = make_project()
     r = client.post(f'/api/projects/{p["id"]}/jobs', json={"kind": "export", "options": {"start": 20, "end": 19}})
