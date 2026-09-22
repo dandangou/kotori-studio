@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import copy
 import math
 import re
 import uuid
@@ -13,6 +14,52 @@ DEFAULT_SPEAKERS = [
     {"id": "korone", "name": "戌神沁音", "color": "#C9994A"},
     {"id": "azki", "name": "AZKi", "color": "#E65D76"},
 ]
+
+
+def sentence_merges(segments, max_duration=9, max_chars=52, max_gap=0.45):
+    """Conservative Japanese continuation suggestions; never infer speaker identity."""
+    if not (2 <= max_duration <= 15 and 16 <= max_chars <= 100 and 0 <= max_gap <= 1):
+        raise ValueError("断句上限需为 2–15 秒、16–100 字，停顿为 0–1 秒")
+    terminal = re.compile(r"[。！？!?][」』）)]*$")
+    continuation = re.compile(r"(?:けれども|けど|ので|のに|から|って|ても|たり|ながら|ため|より|なら|[がをのにとでてやもは、,])$")
+    response = re.compile(r"^(?:うん|ううん|はい|ええ|そう|そうだね|そうなの|なるほど|ありがとう(?:ございます)?|えー?と|えっと|あのー?|あー?|えー?|おー?|へー?|やったー?|嬉しい|かわいい|ふふっ?|んふふっ?)[。！？!?、〜～ー…]*$")
+    reply_start = re.compile(r"^(?:うん|ううん|はい|いや|え[、っ!?]|そう|おかえり|こんにちは|こんばんは|はじめまして|初めまして|やだ|ありがとう|ごめんなさい|嬉しい|かわいい)")
+    groups = []
+    for cue in sorted(segments, key=lambda s: s["start"]):
+        group = groups[-1] if groups else []
+        prev = group[-1] if group else None
+        text = cue.get("ja", "").strip()
+        if prev:
+            before = prev.get("ja", "").strip()
+            same_speaker = (set(prev.get("speaker_ids", [])) == set(cue.get("speaker_ids", []))
+                            and prev.get("speaker", "") == cue.get("speaker", ""))
+            # ponytail: grammar/pause heuristic; unknown speakers still need preview/listening.
+            join = (text and before and same_speaker and not cue.get("reviewed") and not prev.get("reviewed")
+                    and 0 <= cue["start"] - prev["end"] <= max_gap
+                    and cue["end"] - group[0]["start"] <= max_duration
+                    and sum(len(s.get("ja", "")) for s in group) + len(text) <= max_chars
+                    and bool(cue.get("zh", "").strip()) == bool(prev.get("zh", "").strip())
+                    and not terminal.search(before) and continuation.search(before)
+                    and not before.endswith(("かも", "なの", "待って", "呼んで"))
+                    and not response.fullmatch(before) and not response.fullmatch(text) and not reply_start.search(text)
+                    and not {"possible_silence", "repetition", "boundary_review"}.intersection(prev.get("flags", []) + cue.get("flags", [])))
+            if join:
+                group.append(cue)
+                continue
+        groups.append([cue])
+    changes = []
+    for group in groups:
+        if len(group) < 2:
+            continue
+        merged = copy.deepcopy(group[0])
+        merged.update(end=group[-1]["end"], ja="".join(s["ja"].strip() for s in group),
+                      zh=" ".join(s.get("zh", "").strip() for s in group).strip(), reviewed=False,
+                      words=[copy.deepcopy(w) for s in group for w in s.get("words", [])],
+                      flags=list(dict.fromkeys([f for s in group for f in s.get("flags", [])] + ["sentence_merge"])))
+        if all("confidence" in s for s in group):
+            merged["confidence"] = min(s["confidence"] for s in group)
+        changes.append({"ids": [s["id"] for s in group], "segment": merged})
+    return changes
 
 
 def validate_speakers(speakers):

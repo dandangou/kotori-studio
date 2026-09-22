@@ -2461,3 +2461,14 @@ dialog::backdrop {
 .speaker-setting label { display:grid; gap:6px; }
 .speaker-setting input[type=color] { width:65px; height:38px; padding:3px; cursor:pointer; }
 .chorus-letter { display:inline-block; color:transparent; background-clip:text; -webkit-background-clip:text; text-shadow:none; filter:drop-shadow(1px 1px 1px #000) drop-shadow(-1px -1px 1px #000); white-space:pre; line-height:1.1; }
+
+.sentence-settings {display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:12px;}
+.sentence-preview {max-height:48vh;overflow:auto;margin:16px 0;}
+.sentence-proposal {display:flex;align-items:flex-start;gap:12px;padding:14px 4px;border-bottom:1px solid var(--border);cursor:pointer;}
+.sentence-proposal input {margin-top:5px;flex-shrink:0;}
+.sentence-proposal strong,.sentence-proposal small {display:block;}
+.sentence-proposal small {color:var(--muted);margin:8px 0;line-height:1.7;}
+.sentence-proposal p {margin:0;line-height:1.7;}
+@media(max-width:600px){.sentence-settings{grid-template-columns:1fr 1fr;}}
+.checkbox-field {display:flex;align-items:flex-start;gap:8px;margin:16px 0;line-height:1.6;}
+.checkbox-field input {flex-shrink:0;margin-top:4px;}

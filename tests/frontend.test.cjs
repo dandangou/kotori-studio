@@ -359,3 +359,17 @@ test('batch export submits one job per named cut with its own ordered ranges and
   assert.equal(run('calls[1].options.format'),'ass');
   assert.equal(run('calls[1].options.language'),'zh');
 });
+
+test('sentence merge application keeps unselected cues and can restore the original snapshot', () => {
+  const {run} = harness();
+  run(`
+    const originalCues = [{id:'a',ja:'お姉ちゃんの',start:0,end:1},{id:'b',ja:'後輩',start:1,end:2},{id:'c',ja:'はい',start:2,end:3}];
+    const originalSnapshot = JSON.stringify(originalCues);
+    const mergePlan = [{ids:['a','b'],segment:{id:'a',ja:'お姉ちゃんの後輩',start:0,end:2}}];
+    const resultCues = applySentenceMerges(originalCues,mergePlan);
+  `);
+  assert.equal(run('JSON.stringify(originalCues)'),run('originalSnapshot'));
+  assert.equal(run('resultCues.map(s=>s.id).join(",")'),'a,c');
+  assert.equal(run('resultCues[0].ja'),'お姉ちゃんの後輩');
+  assert.equal(run('JSON.stringify(applySentenceMerges(originalCues,[]))'),run('originalSnapshot'));
+});

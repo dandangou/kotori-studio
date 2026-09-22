@@ -19,7 +19,7 @@ function coloredText(text, cue) {
   return [...text].map(char => char === '\n' ? '<br>' : `<span class="chorus-letter" style="background-image:${gradient}">${escapeHtml(char)}</span>`).join('');
 }
 
-const FLAG_LABELS = {low_confidence:'低置信度',possible_silence:'疑似无语音',repetition:'疑似重复',fast_speech:'语速过快',boundary_review:'分段边界待核',imported:'已导入',translation_review:'译文待听校',transcript_corrected:'已参考另一转写修订'};
+const FLAG_LABELS = {sentence_merge:'已整理断句 · 待听校',low_confidence:'低置信度',possible_silence:'疑似无语音',repetition:'疑似重复',fast_speech:'语速过快',boundary_review:'分段边界待核',imported:'已导入',translation_review:'译文待听校',transcript_corrected:'已参考另一转写修订'};
 const state = {project:null,base:null,projects:[],system:null,jobs:[],jobStates:new Map(),dismissedJobs:new Set(),selectedId:null,activeHighlight:null,clip:{start:0,end:0},undo:[],saveTimer:null,saving:null,polling:false,zoom:0,viewStart:0,drag:null,loading:false,mediaUrl:'',subtitlePage:0,rowMap:new Map(),playingIds:new Set(),youtubeJobId:null,recovery:[]};
 
 function timecode(value, milliseconds = true) {
@@ -370,6 +370,7 @@ function updateEditButtons() {
   const selected = state.project?.segments.some((s) => s.id === state.selectedId);
   for (const id of ['split-subtitle','merge-subtitle','delete-subtitle']) $(id).disabled = !selected;
   $('shift-subtitle').disabled = !state.project?.segments.length;
+  $('sentence-subtitle').disabled = !state.project?.segments.length;
   $('undo-subtitle').disabled = state.undo.length === 0;
 }
 function selectSegment(id, seekTo = false, scroll = false) {
@@ -413,6 +414,36 @@ function mergeSubtitle() {
 }
 function deleteSubtitle() { const s = selectedSegment(); checkpoint(); state.project.segments = state.project.segments.filter((row) => row.id !== s.id); state.selectedId = null; changedSegments(); }
 function undoSubtitle() { if (!state.undo.length) return; state.project.segments = state.undo.pop(); changedSegments(); notify('已撤销上一组字幕修改。'); }
+
+let sentencePreview = null;
+async function previewSentences() {
+  const p = requireProject(); commitClipInputs(); await flushSave();
+  sentencePreview = null; $('sentence-apply').disabled = true;
+  const baseline = clone(p.segments), projectId = p.id;
+  const options = {max_duration:Number($('sentence-duration').value),max_chars:Number($('sentence-chars').value),max_gap:Number($('sentence-gap').value),...($('sentence-scope').value === 'clip' ? validRange() : {})};
+  const result = await api(`/api/projects/${projectId}/sentence-preview`,{method:'POST',body:options});
+  if (state.project.id !== projectId || !equal(state.project.segments,baseline) || state.project.revision !== result.revision) throw new Error('字幕已更新，请重新预览。');
+  sentencePreview = {projectId,baseline,merges:result.merges};
+  const originals = new Map(baseline.map(s => [s.id,s]));
+  $('sentence-preview').innerHTML = result.merges.length ? result.merges.map((m,i) => `<label class="sentence-proposal"><input type="checkbox" data-merge="${i}" checked><span><strong>${timecode(m.segment.start)} → ${timecode(m.segment.end)} · ${m.ids.length} 条合为一条</strong><small>${m.ids.map(id => escapeHtml(originals.get(id).ja)).join(' / ')}</small><p>${escapeHtml(m.segment.ja)}</p></span></label>`).join('') : '<p class="muted">没有找到适合保守合并的碎句。可调整上限，或用「合并」手动处理。</p>';
+  $('sentence-summary').textContent = `建议整理 ${result.merges.length} 组；取消勾选可保留原断句。已校对字幕、不同说话人、明显短回应会跳过；未标说话人的对话仍需试听。`;
+  $('sentence-apply').disabled = !result.merges.length;
+}
+function applySentenceMerges(segments,merges) {
+  const replacements = new Map(merges.map(m => [m.ids[0],m.segment]));
+  const removed = new Set(merges.flatMap(m => m.ids.slice(1)));
+  return segments.filter(s => !removed.has(s.id)).map(s => clone(replacements.get(s.id) || s));
+}
+async function applySentences() {
+  const p = requireProject(), preview = sentencePreview;
+  if (!preview || p.id !== preview.projectId || !equal(p.segments,preview.baseline)) throw new Error('字幕已更新，请重新预览后应用。');
+  const merges = [...$('sentence-preview').querySelectorAll('[data-merge]:checked')].map(n => preview.merges[Number(n.dataset.merge)]);
+  if (!merges.length) throw new Error('请至少勾选一组合并建议。');
+  checkpoint(); p.segments = applySentenceMerges(p.segments,merges); changedSegments();
+  await flushSave(); closeDialog('sentence-dialog');
+  notify(`已整理 ${merges.length} 组断句，保留现有译文；可撤销。中文只是拼接，建议按新句子复核或重译。`);
+  if ($('sentence-retranslate').checked) await startJob('translate',{provider:'local',overwrite:true,segment_ids:merges.map(m => m.ids[0])});
+}
 function commitSubtitleTime(input) {
   const row = input.closest('.subtitle-row'), s = state.project?.segments.find((s) => s.id === row?.dataset.id), field = input.dataset.field;
   if (!s || !['start','end'].includes(field)) return;
@@ -677,7 +708,7 @@ function bindEvents() {
   $('waveform-button').onclick = handle(async () => { await startJob('waveform'); });
   $('semantic-button').onclick = handle(async () => { if (!requireProject().segments.length) throw new Error('语义选片需要字幕，请先识别日语或导入 SRT。'); commitCandidateSettings(); await startJob('semantic',{story_mode:$('story-mode').value}); });
   $('asr-button').onclick = handle(() => { commitClipInputs(); $('asr-model').value = state.project.settings.asr_model || 'turbo'; showDialog('asr-dialog'); });
-  $('asr-form').onsubmit = handle(async (event) => { event.preventDefault(); const options = {model:$('asr-model').value,...($('asr-scope').value === 'clip' ? validRange() : {})}; state.project.settings.asr_model = options.model; markDirty(); await startJob('transcribe',options); closeDialog('asr-dialog'); });
+  $('asr-form').onsubmit = handle(async (event) => { event.preventDefault(); const options = {model:$('asr-model').value,sentence_grouping:$('asr-sentence-grouping').checked,...($('asr-scope').value === 'clip' ? validRange() : {})}; state.project.settings.asr_model = options.model; markDirty(); await startJob('transcribe',options); closeDialog('asr-dialog'); });
   $('translate-button').onclick = handle(() => { if (!requireProject().segments.length) throw new Error('还没有字幕，请先识别日语或导入 SRT。'); commitClipInputs(); showDialog('translate-dialog'); });
   $('translation-provider').onchange = () => $('api-fields').classList.toggle('hidden',$('translation-provider').value === 'local');
   $('translate-form').onsubmit = handle(async (event) => {
@@ -721,6 +752,10 @@ function bindEvents() {
   $('subtitle-list').addEventListener('click',handle((event) => { const row = event.target.closest('.subtitle-row'); if (!row) return; selectSegment(row.dataset.id); const action = event.target.closest('[data-row-action]')?.dataset.rowAction; if (action === 'seek') seek(selectedSegment().start); if (action === 'pin-start' || action === 'pin-end') { event.preventDefault(); pinSubtitleTime(action === 'pin-start' ? 'start' : 'end'); } if (action === 'review') { checkpoint(); const s = selectedSegment(); s.reviewed = !s.reviewed; markDirty(); renderSubtitles(); } }));
   $('add-subtitle').onclick = handle(addSubtitle); $('split-subtitle').onclick = handle(splitSubtitle); $('merge-subtitle').onclick = handle(mergeSubtitle); $('delete-subtitle').onclick = handle(deleteSubtitle); $('undo-subtitle').onclick = handle(undoSubtitle);
   $('shift-subtitle').onclick = handle(() => { commitClipInputs(); $('shift-offset').value = '0.000'; renderShiftPreview(); showDialog('shift-dialog'); });
+  $('sentence-subtitle').onclick = handle(async () => { showDialog('sentence-dialog'); await previewSentences(); });
+  $('sentence-refresh').onclick = handle(previewSentences);
+  for (const id of ['sentence-scope','sentence-duration','sentence-chars','sentence-gap']) $(id).onchange = () => { sentencePreview = null; $('sentence-apply').disabled = true; $('sentence-summary').textContent = '参数已变更，请重新预览。'; };
+  $('sentence-form').onsubmit = handle(async event => { event.preventDefault(); await applySentences(); });
   $('shift-offset').oninput = renderShiftPreview; $('shift-scope').onchange = renderShiftPreview;
   $('shift-form').onsubmit = handle(async (event) => {
     event.preventDefault(); const {offset,timings} = shiftPlan(), byId = new Map(timings.map((s) => [s.id,s]));

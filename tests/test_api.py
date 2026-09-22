@@ -35,6 +35,19 @@ def test_autosave_conflict_returns_409(client):
     assert client.get(f'/api/projects/{p["id"]}').json()["name"] == "新的名称"
 
 
+def test_sentence_preview_is_read_only_and_validates_limits(client):
+    p = make_project()
+    p = store.patch_project(p["id"], {"revision": p["revision"], "segments": [
+        {"id": "a", "start": 1, "end": 2, "ja": "お姉ちゃんの", "zh": "姐姐的"},
+        {"id": "b", "start": 2, "end": 3, "ja": "後輩です", "zh": "后辈"}]})
+    url = f'/api/projects/{p["id"]}/sentence-preview'
+    result = client.post(url, json={}).json()
+    assert result["merges"][0]["ids"] == ["a", "b"]
+    assert store.get_project(p["id"]) == p
+    assert client.post(url, json={"start": 1.5, "end": 3}).json()["merges"] == []
+    assert client.post(url, json={"max_gap": 20}).status_code == 422
+
+
 def test_invalid_export_range_never_queued(client):
     p = make_project()
     r = client.post(f'/api/projects/{p["id"]}/jobs', json={"kind": "export", "options": {"start": 20, "end": 19}})

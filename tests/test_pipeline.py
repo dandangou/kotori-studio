@@ -141,6 +141,35 @@ class ScoringTests(unittest.TestCase):
 
 
 class ResumeTests(unittest.TestCase):
+    def test_sentence_grouping_preserves_timing_text_and_dialogue_boundaries(self):
+        from app.subtitles import sentence_merges
+        def cue(n, ja, **extra):
+            return {"id": str(n), "start": n * 2, "end": n * 2 + 2, "ja": ja, "zh": "译文" + str(n),
+                    "words": [{"word": ja, "start": n * 2, "end": n * 2 + 2}], **extra}
+        source = [cue(0, "ビビちゃんはおしゃれで"), cue(1, "メイクもお洋服も"), cue(2, "全部すごくおしゃれって聞いてるから"),
+                  cue(3, "うん"), cue(4, "ありがとう！")]
+        before = json.dumps(source)
+        changes = sentence_merges(source)
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["ids"], ["0", "1", "2"])
+        merged = changes[0]["segment"]
+        self.assertEqual((merged["start"], merged["end"]), (0, 6))
+        self.assertEqual(merged["ja"], "".join(s["ja"] for s in source[:3]))
+        self.assertEqual(len(merged["words"]), 3)
+        self.assertEqual(merged["zh"], "译文0 译文1 译文2")
+        self.assertEqual(json.dumps(source), before)
+        for pair in [
+            [cue(0, "お姉ちゃんの", speaker_ids=["a"]), cue(1, "後輩", speaker_ids=["b"])],
+            [cue(0, "お姉ちゃんの", reviewed=True), cue(1, "後輩")],
+            [cue(0, "お姉ちゃんの"), cue(2, "後輩")],
+            [cue(0, "お姉ちゃんの"), cue(1, "はいそうです")],
+            [cue(0, "ここにいるから。"), cue(1, "次の話")],
+            [cue(0, "お姉ちゃんの"), cue(1, "後輩", zh="")],
+        ]:
+            self.assertEqual(sentence_merges(pair), [])
+        self.assertEqual(sentence_merges(source, max_duration=2), [])
+        self.assertEqual(sentence_merges(source, max_chars=16), [])
+
     def test_asr_resume_reuses_complete_chunks_but_glossary_invalidates(self):
         import numpy as np
         calls = []
@@ -183,6 +212,16 @@ class ResumeTests(unittest.TestCase):
             self.assertEqual(len(calls), 1)
             pipeline.translate(project, {"overwrite": True}, folder)
             self.assertEqual(len(calls), 2)
+
+    def test_translation_can_retranslate_only_selected_merged_cues(self):
+        project = {"id": "selected", "duration": 10, "segments": [
+            {"id": "keep", "start": 0, "end": 1, "ja": "原文", "zh": "人工译文"},
+            {"id": "merged", "start": 1, "end": 4, "ja": "合并原文", "zh": "旧译文"}]}
+        with tempfile.TemporaryDirectory() as folder, patch.object(pipeline, "LocalLanguageModel") as model:
+            model.return_value.complete.return_value = '[{"id":"s0","zh":"新译文"}]'
+            result = pipeline.translate(project, {"segment_ids": ["merged"], "overwrite": True}, folder)
+        self.assertEqual(result["translations"], [{"id": "merged", "zh": "新译文"}])
+        self.assertEqual(project["segments"][0]["zh"], "人工译文")
 
     def test_translation_retries_only_missing_ids_and_keeps_partial_checkpoint(self):
         calls = []

@@ -199,6 +199,25 @@ def update_project(project_id: str, body: dict):
     return store.patch_project(project_id, body)
 
 
+class SentenceOptions(BaseModel):
+    max_duration: float = Field(default=9, ge=2, le=15)
+    max_chars: int = Field(default=52, ge=16, le=100)
+    max_gap: float = Field(default=0.45, ge=0, le=1)
+    start: float = Field(default=0, ge=0)
+    end: float | None = Field(default=None, ge=0)
+
+
+@app.post("/api/projects/{project_id}/sentence-preview")
+def sentence_preview(project_id: str, body: SentenceOptions):
+    from .subtitles import sentence_merges
+    project = store.get_project(project_id)
+    end = project["duration"] if body.end is None else body.end
+    if not 0 <= body.start < end <= project["duration"] + 0.001:
+        raise ValueError("断句范围必须在视频时长内")
+    segments = [s for s in project["segments"] if s["start"] >= body.start and s["end"] <= end]
+    return {"revision": project["revision"], "merges": sentence_merges(segments, body.max_duration, body.max_chars, body.max_gap)}
+
+
 @app.get("/api/projects/{project_id}/media")
 def media(project_id: str):
     project = store.get_project(project_id)
