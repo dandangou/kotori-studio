@@ -630,6 +630,7 @@ def translate(project, options, data_dir, progress=_noop):
     glossary = str(project.get("settings", {}).get("glossary", ""))[:4000]
     batches = list(_batches(target))
     translations = []
+    untranslated = []
     positions = {s["id"]: i for i, s in enumerate(all_segments)}
     backend = {"provider": provider, "model": options.get("api_model") if provider != "local" else cached_model_path("qwen3-4b", data_dir),
                "base": options.get("api_base") if provider != "local" else ""}
@@ -644,41 +645,54 @@ def translate(project, options, data_dir, progress=_noop):
         prompt += "\n后文只供理解，不需要翻译：\n" + json.dumps([s["ja"] for s in all_segments[after:after+3]], ensure_ascii=False)
         prompt += "\n注意跨行断句、反问、否定和主语省略。叠声或疑似识别错误无法确定时标注[待核]，不要猜人名。"
         aliases = {f"s{j}": s["id"] for j, s in enumerate(batch)}
-        prompt += "\n请翻译以下字幕：\n" + json.dumps([{"id": f"s{j}", "ja": s["ja"]} for j, s in enumerate(batch)], ensure_ascii=False)
+        context_prompt = prompt
+        inputs = [{"id": f"s{j}", "ja": s["ja"]} for j, s in enumerate(batch)]
+        prompt += "\n请翻译以下字幕：\n" + json.dumps(inputs, ensure_ascii=False)
         expected = {s["id"] for s in batch}
         received = {}
         checkpoint = cache / (_cache_key({"version": 1, "backend": backend, "system": system, "prompt": prompt}) + ".json")
         if checkpoint.exists() and not options.get("overwrite", False):
             try:
                 saved = json.loads(checkpoint.read_text(encoding="utf-8"))
-                if isinstance(saved, dict) and set(saved) == expected and all(isinstance(v, str) and v.strip() for v in saved.values()):
-                    translations.extend({"id": s["id"], "zh": saved[s["id"]]} for s in batch)
-                    continue
+                if isinstance(saved, dict) and set(saved) <= expected and all(isinstance(v, str) and v.strip() for v in saved.values()):
+                    received.update(saved)
             except (OSError, ValueError):
                 pass
-        if model is None:
-            model = APIModel(options) if provider in {"openai-compatible", "api"} else LocalLanguageModel(data_dir, progress)
-        for attempt in range(2):
-            try:
-                response = _extract_json(model.complete(system, prompt, max_tokens=2300))
-                if isinstance(response, dict):
-                    response = response.get("translations", response.get("items", []))
-                for row in response:
-                    if isinstance(row, dict):
-                        ident = aliases.get(row.get("id"), row.get("id"))
-                        if ident in expected and isinstance(row.get("zh"), str) and row["zh"].strip():
+        for size in (12, 3, 1):
+            pending = [row for row in inputs if aliases[row["id"]] not in received]
+            if not pending:
+                break
+            if model is None:
+                model = APIModel(options) if provider in {"openai-compatible", "api"} else LocalLanguageModel(data_dir, progress)
+            if size < 12:
+                progress(0.04 + 0.93 * i / len(batches), f"第 {i + 1}/{len(batches)} 组漏译 {len(pending)} 条，自动按 {size} 条补译")
+            for subset in _batches(pending, max_items=size):
+                request_prompt = context_prompt
+                if size < 12:
+                    request_prompt += "\n这是漏译补译。只返回以下指定 id，保留编号，不合并、不省略。"
+                request_prompt += "\n请翻译以下字幕：\n" + json.dumps(subset, ensure_ascii=False)
+                requested = {aliases[row["id"]] for row in subset}
+                try:
+                    response = _extract_json(model.complete(system, request_prompt, max_tokens=2300))
+                    if isinstance(response, dict):
+                        response = [response] if "id" in response else response.get("translations", response.get("items", []))
+                    for row in response:
+                        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+                            continue
+                        ident = aliases.get(row["id"], row["id"])
+                        if ident in requested and isinstance(row.get("zh"), str) and row["zh"].strip():
                             received[ident] = row["zh"].strip()
-                if set(received) == expected:
-                    break
-            except (ValueError, TypeError):
-                pass
-            prompt += "\n严格返回完整 JSON 数组，必须保留所有 id。不要解释。"
-        if set(received) != expected:
-            raise RuntimeError(f"模型返回的字幕对应关系不完整（第 {i + 1} 组），未覆盖已有字幕；请缩小范围重试")
-        _atomic_checkpoint(checkpoint, received)
-        translations.extend({"id": s["id"], "zh": received[s["id"]]} for s in batch)
+                except (ValueError, TypeError):
+                    pass
+                # Save valid rows even when a response is incomplete or a later request fails.
+                _atomic_checkpoint(checkpoint, received)
+        untranslated.extend(s["id"] for s in batch if s["id"] not in received)
+        translations.extend({"id": s["id"], "zh": received[s["id"]]} for s in batch if s["id"] in received)
     progress(1.0, f"已生成 {len(translations)} 条中文初译，请逐条复核")
-    return {"translations": translations}
+    result = {"translations": translations}
+    if untranslated:
+        result["warning"] = f"{len(untranslated)} 条字幕经自动补译仍未返回有效结果，已保留原有译文或空白；可再次初译补齐空白，或选中对应范围重译"
+    return result
 
 
 def semantic(project, options, data_dir, progress=_noop):

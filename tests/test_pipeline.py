@@ -184,6 +184,50 @@ class ResumeTests(unittest.TestCase):
             pipeline.translate(project, {"overwrite": True}, folder)
             self.assertEqual(len(calls), 2)
 
+    def test_translation_retries_only_missing_ids_and_keeps_partial_checkpoint(self):
+        calls = []
+        outputs = iter([
+            '[{"id":[],"zh":"invalid"},{"id":"s0","zh":"第一句"}]',
+            '{"items":[{"id":"s0","zh":"不能覆盖"},{"id":"s2","zh":"第三句"}]}',
+            'broken JSON',
+            '{"id":"s1","zh":"第二句"}',
+        ])
+        class FakeModel:
+            def __init__(self, *args):
+                pass
+            def complete(self, system, prompt, **kwargs):
+                calls.append(json.loads(prompt.split("请翻译以下字幕：\n")[-1]))
+                return next(outputs)
+        project = {"id": "partial", "duration": 10, "segments": [
+            {"id": f"cue{n}", "start": n, "end": n + 1, "ja": f"原文{n}"} for n in range(3)]}
+        with tempfile.TemporaryDirectory() as folder, patch.object(pipeline, "LocalLanguageModel", FakeModel):
+            first = pipeline.translate(project, {}, folder)
+            self.assertIn("1 条字幕", first["warning"])
+            self.assertEqual(first["translations"], [{"id": "cue0", "zh": "第一句"}, {"id": "cue2", "zh": "第三句"}])
+            second = pipeline.translate(project, {}, folder)
+            self.assertNotIn("warning", second)
+            self.assertEqual([r["zh"] for r in second["translations"]], ["第一句", "第二句", "第三句"])
+            self.assertEqual([[r["id"] for r in call] for call in calls], [["s0", "s1", "s2"], ["s1", "s2"], ["s1"], ["s1"]])
+
+    def test_translation_subdivides_malformed_batches_without_reordering(self):
+        calls = []
+        class FakeModel:
+            def __init__(self, *args):
+                pass
+            def complete(self, system, prompt, **kwargs):
+                rows = json.loads(prompt.split("请翻译以下字幕：\n")[-1])
+                calls.append(len(rows))
+                if len(rows) > 1:
+                    return 'not JSON'
+                return json.dumps({"id": rows[0]["id"], "zh": rows[0]["ja"] + "译"})
+        project = {"id": "split", "duration": 20, "segments": [
+            {"id": f"cue{n}", "start": n, "end": n + 1, "ja": str(n)} for n in range(12)]}
+        with tempfile.TemporaryDirectory() as folder, patch.object(pipeline, "LocalLanguageModel", FakeModel):
+            result = pipeline.translate(project, {}, folder)
+        self.assertNotIn("warning", result)
+        self.assertEqual([r["id"] for r in result["translations"]], [s["id"] for s in project["segments"]])
+        self.assertEqual(calls, [12] + [3] * 4 + [1] * 12)
+
 
 @unittest.skipUnless(pipeline.ffmpeg_path(), "FFmpeg not installed")
 class MediaTests(unittest.TestCase):
